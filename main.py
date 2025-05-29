@@ -1,6 +1,7 @@
 import os
 import streamlit as st
-from langchain.chat_models import ChatGoogleGenerativeAI
+import pandas as pd
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
@@ -20,22 +21,65 @@ prompt_template = PromptTemplate(
 llm_chain = LLMChain(llm=llm, prompt=prompt_template)
 
 def process_uploaded_file(uploaded_file):
-    # Implement your file processing logic here
-    # This function should return the processed tariff data
-    pass
+    try:
+        # Check the file type and process accordingly
+        if uploaded_file.name.endswith('.csv'):
+            tariff_data = pd.read_csv(uploaded_file)
+        elif uploaded_file.name.endswith('.json'):
+            tariff_data = pd.read_json(uploaded_file)
+        elif uploaded_file.name.endswith('.xlsx'):
+            try:
+                # Read Excel without openpyxl
+                tariff_data = pd.read_excel(uploaded_file)
+            except:
+                try:
+                    # Fallback to xlrd for older Excel files
+                    tariff_data = pd.read_excel(uploaded_file, engine='xlrd')
+                except Exception as e:
+                    st.error("Could not read Excel file. Please try converting to CSV format.")
+                    return None
+        else:
+            st.error("Supported formats: CSV, JSON, Excel (.xlsx)")
+            return None
+
+        # Validate that we have data
+        if tariff_data.empty:
+            st.warning("The uploaded file contains no data.")
+            return None
+
+        # Convert DataFrame to formatted string
+        return tariff_data.to_string(index=False)
+    except Exception as e:
+        st.error(f"Error processing file: {str(e)}")
+        return None
 
 def main():
     st.title("Hospital Reimbursement Assistant")
-    uploaded_file = st.file_uploader("Upload Tariff Document", type=["csv", "json"])
+    
+    # Add file type information
+    st.info("Supported file types: CSV, JSON, Excel (.xlsx)")
+    
+    uploaded_file = st.file_uploader("Upload Tariff Document", type=["csv", "json", "xlsx"])
 
     if uploaded_file is not None:
-        tariff_data = process_uploaded_file(uploaded_file)
-        query = st.text_input("Ask a question about reimbursement:")
+        # Show loading spinner while processing file
+        with st.spinner("Processing uploaded file..."):
+            tariff_data = process_uploaded_file(uploaded_file)
+            
+        if tariff_data is not None:
+            # Show preview of the data
+            st.subheader("Data Preview")
+            st.text(tariff_data[:500] + "..." if len(tariff_data) > 500 else tariff_data)
+            
+            query = st.text_input("Ask a question about reimbursement:")
 
-        if query:
-            # Use the LLM chain to generate a response
-            response = llm_chain.run(query=query, tariff_data=tariff_data)
-            st.write("Answer:", response)
+            if query:
+                with st.spinner("Generating response..."):
+                    try:
+                        response = llm_chain.run(query=query, tariff_data=tariff_data)
+                        st.write("Answer:", response)
+                    except Exception as e:
+                        st.error(f"Error generating response: {str(e)}")
 
 if __name__ == "__main__":
     main()
